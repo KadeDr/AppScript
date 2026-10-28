@@ -7,6 +7,77 @@ function doGet(e) {
     var section = e.parameter.section;
     var lesson = e.parameter.lesson;
     var isTocRequest = e.parameter.toc === "true";
+    var isFullFetch = e.parameter.full === "true" || (!category && !isTocRequest);
+
+    if (isFullFetch) {
+      var masterData = { categories: {} };
+
+      // 1. Fetch all TOCs
+      var tocSs = SpreadsheetApp.openById(TOC_SPREADSHEET_ID);
+      var tocSheets = tocSs.getSheets();
+      for (var t = 0; t < tocSheets.length; t++) {
+        var catName = tocSheets[t].getName();
+        var tocRows = tocSheets[t].getDataRange().getValues();
+        var tocList = [];
+        for (var r = 0; r < tocRows.length; r++) {
+          if (tocRows[r][0]) {
+            tocList.push({ type: tocRows[r][0], text: tocRows[r][1] });
+          }
+        }
+        if (!masterData.categories[catName]) masterData.categories[catName] = { toc: [], pages: {} };
+        masterData.categories[catName].toc = tocList;
+      }
+
+      // 2. Fetch all Pages
+      var pagesSs = SpreadsheetApp.openById(PAGES_SPREADSHEET_ID);
+      var pageSheets = pagesSs.getSheets();
+      for (var p = 0; p < pageSheets.length; p++) {
+        var pSheet = pageSheets[p];
+        if (pSheet.getLastRow() < 1) continue;
+
+        var header = pSheet.getRange(1, 1, 1, 3).getValues()[0];
+        var pCat = String(header[0]).trim();
+        var pSec = String(header[1]).trim();
+        var pLes = String(header[2]).trim();
+
+        if (!pCat) continue;
+
+        if (!masterData.categories[pCat]) {
+          masterData.categories[pCat] = { toc: [], pages: {} };
+        }
+        if (!masterData.categories[pCat].pages[pSec]) {
+          masterData.categories[pCat].pages[pSec] = {};
+        }
+
+        var pRows = pSheet.getDataRange().getValues();
+        var elements = [];
+        for (var i = 1; i < pRows.length; i++) {
+          var type = pRows[i][0];
+          var colB = pRows[i][1];
+          var colC = pRows[i][2];
+          if (!type) continue;
+
+          if (type === 'VideoPill' || type === 'Video') {
+            var titleVal = '', captionVal = '';
+            try {
+              var parsed = JSON.parse(colB);
+              titleVal = parsed.title || '';
+              captionVal = parsed.caption || '';
+            } catch (err) {
+              titleVal = colB || '';
+            }
+            elements.push({ type: 'VideoPill', title: titleVal, caption: captionVal, videoUrl: colC || '' });
+          } else {
+            elements.push({ type: type, text: colB, language: colC || '' });
+          }
+        }
+
+        masterData.categories[pCat].pages[pSec][pLes] = elements;
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({ status: "success", data: masterData }))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
 
     // Fallback if no category or if on Landing Page
     if (!category || category === 'Landing Page') {
